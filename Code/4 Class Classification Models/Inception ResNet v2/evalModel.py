@@ -16,6 +16,10 @@ import itertools
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_curve, auc, confusion_matrix, accuracy_score
+from sklearn.metrics import roc_curve, auc
+from sklearn.preprocessing import label_binarize
+from scipy import interp
+from itertools import cycle
 
 if torch.cuda.is_available:
     device = torch.device('cuda')
@@ -37,6 +41,7 @@ def evaluate_model(model, dataloader, loss_fn, phase = 'test'):
         loss = loss_fn(output, label)
         _, pred = torch.max(output, dim = 1)
         num_inputs = inputs.size()[0]
+        output = F.softmax(output)
         outputs = np.append(outputs, output.cpu().detach().numpy())
         preds = np.append(preds, pred.cpu().detach().numpy())
         labels = np.append(labels, label.cpu().detach().numpy())
@@ -48,45 +53,104 @@ def evaluate_model(model, dataloader, loss_fn, phase = 'test'):
     
     return outputs[1:], preds[1:], labels[1:], accuracy, loss
 
-def plot_confusion_matrix(cm, target_names, title='Confusion matrix', 
-                          root_dir = '/scratch/bva212/dl4medProject/', model_folder = '', 
-                          cmap=None, normalize=True):
+# this function AUC of ROC for binary classification problem. 
+
+def get_AUC(y_score, y_target,plotROC=False):
+    n_classes = y_score.shape[1]
     
-    accuracy = np.trace(cm) / float(np.sum(cm))
-    misclass = 1 - accuracy
+    label_names = {0:'Benign Calcification',1:'Malignant Calcification',2:'Benign Mass',3:'Malignant Mass'}
 
-    if cmap is None:
-        cmap = plt.get_cmap('Blues')
+    # Compute ROC curve and ROC area for each class
+    fpr = dict()
+    tpr = dict()
+    roc_auc = dict()
+    for i in range(n_classes):
+        fpr[i], tpr[i], _ = roc_curve(y_target[:, i], y_score[:, i])
+        roc_auc[i] = auc(fpr[i], tpr[i])
 
-    plt.figure(figsize=(8, 6))
+    # Compute micro-average ROC curve and ROC area
+    fpr["micro"], tpr["micro"], _ = roc_curve(y_target.ravel(), y_score.ravel())
+    roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+
+
+    # Compute macro-average ROC curve and ROC area
+
+    # First aggregate all false positive rates
+    all_fpr = np.unique(np.concatenate([fpr[i] for i in range(n_classes)]))
+
+    # Then interpolate all ROC curves at this points
+    mean_tpr = np.zeros_like(all_fpr)
+    for i in range(n_classes):
+        mean_tpr += interp(all_fpr, fpr[i], tpr[i])
+
+    # Finally average it and compute AUC
+    mean_tpr /= n_classes
+
+    fpr["macro"] = all_fpr
+    tpr["macro"] = mean_tpr
+    roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
+    
+    if plotROC:
+        lw = 2
+        # Plot all ROC curves
+        plt.figure(figsize = (8,6))
+        plt.plot(fpr["micro"], tpr["micro"],
+                 label='micro-average ROC curve (area = {0:0.2f})'
+                       ''.format(roc_auc["micro"]),
+                 color='deeppink', linestyle=':', linewidth=4)
+
+        plt.plot(fpr["macro"], tpr["macro"],
+                 label='macro-average ROC curve (area = {0:0.2f})'
+                       ''.format(roc_auc["macro"]),
+                 color='navy', linestyle=':', linewidth=4)
+
+        colors = cycle(['aqua', 'darkorange', 'cornflowerblue'])
+        for i, color in zip(range(n_classes), colors):
+            plt.plot(fpr[i], tpr[i], color=color, lw=lw,
+                     label='ROC curve of class {0} (area = {1:0.2f})'
+                     ''.format(label_names[i], roc_auc[i]))
+
+        plt.plot([0, 1], [0, 1], 'k--', lw=lw)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Inception ResNet v2 - 4 Class Classification Model')
+        plt.legend(loc="lower right")
+        plt.show()
+
+    return roc_auc
+
+# confusion matrix function
+def plot_confusion_matrix(cm, classes,
+                          normalize=False,
+                          title='Confusion matrix',
+                          cmap=plt.cm.Blues):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title(title)
     plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
 
-    if target_names is not None:
-        tick_marks = np.arange(len(target_names))
-        plt.xticks(tick_marks, target_names, rotation=45)
-        plt.yticks(tick_marks, target_names)
-
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
-
-    thresh = cm.max() / 1.5 if normalize else cm.max() / 2
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        if normalize:
-            plt.text(j, i, "{:0.4f}".format(cm[i, j]),
-                     horizontalalignment="center",
-                     color="white" if cm[i, j] > thresh else "black")
-        else:
-            plt.text(j, i, "{:,}".format(cm[i, j]),
-                     horizontalalignment="center",
-                     color="white" if cm[i, j] > thresh else "black")
-
+        plt.text(j, i, format(cm[i, j], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
 
     plt.tight_layout()
     plt.ylabel('True label')
-    plt.xlabel('Predicted label\naccuracy={:0.4f}; misclass={:0.4f}'.format(accuracy, misclass))
-    plt.legend()
-    plt.savefig(os.path.join(root_dir,model_folder, 'ConfusionMatrix - Test'))
-    plt.show()
+    plt.xlabel('Predicted label')
+
+

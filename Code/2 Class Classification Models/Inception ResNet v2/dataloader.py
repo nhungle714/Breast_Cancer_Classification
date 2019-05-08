@@ -61,7 +61,7 @@ class CBISDDSMDataset(Dataset):
             if p1 <= self.transform_prob:
                 image = image[:,:,-1].copy()
             if p2 <= self.transform_prob:
-                image = transform.rotate(image,180)
+                image = transform.flip(image,180)
         
         sample = {'x': image, 'y': image_class}
 

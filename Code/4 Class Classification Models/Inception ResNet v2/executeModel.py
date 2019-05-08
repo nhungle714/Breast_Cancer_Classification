@@ -15,6 +15,7 @@ import torch.nn.functional as F
 import torchvision
 from torch.utils.data import Dataset, DataLoader
 import torchvision.models as models
+from inceptionResnet_v2 import *
 from sklearn.metrics import roc_curve, auc, confusion_matrix, accuracy_score
 import datetime
 
@@ -32,35 +33,38 @@ modelName = ''
 root_dir = '/scratch/bva212/breastCancerData'
 model_folder = 'temp_testing/'
 project_save_loc = '/scratch/bva212/dl4medProject/'
-project_save_dir = 'temp_testing/'
+project_save_dir = 'Inception_v2_4_Classes/'
 image_column = 'image file path'
-batchSize = 2
-num_classes = 2
-if num_classes == 2:
-	target_names = ['Benign', 'Malignant']
+if torch.cuda.device_count() >= 2:
+    batchSize = 8
 else:
-	target_names = ['Calcification - Benign', 'Calcification - Malignant', 'Mass - Benign', 'Mass - Malignant']
+    batchSize = 4
+num_classes = 4
+if num_classes == 2:
+    target_names = ['Benign', 'Malignant']
+else:
+    target_names = ['Calcification - Benign', 'Calcification - Malignant', 'Mass - Benign', 'Mass - Malignant']
 num_channel = 3
 image_resize = 1024
 transform_prob = 0.5
-numEpochs = 3 
+numEpochs = 100
 dropout_rate = 0.2
 learning_rate = 0.0005
 verbose = True 
 print_every = 3
-save = False
+save = True
 save_every = 20
-train_file = 'randomTrainSet.pkl'
-val_file = 'randomValidationSet.pkl'
-test_file = 'randomTestSet.pkl'
-# train_file = 'Train.pkl'
-# val_file = 'Val.pkl'
-# test_file = 'Test.pkl'
+# train_file = 'randomTrainSet.pkl'
+# val_file = 'randomValidationSet.pkl'
+# test_file = 'randomTestSet.pkl'
+train_file = 'Train.pkl'
+val_file = 'Val.pkl'
+test_file = 'Test.pkl'
 
 
 print('Training Stats:')
 print('#Classes: {} | #Image Size: {} | #Batch Size: {} | #Epochs: {} | Learning Rate: {}'.format(num_classes, image_resize, batchSize, numEpochs, learning_rate))
-print('Saving model & plots in: {}'.format(os.path.join(project_save_loc,project_save_dir)))
+print('Saving model in: {}'.format(os.path.join(project_save_loc,project_save_dir)))
 print('-' * 20)
 
 train_transform = transforms.Compose([
@@ -89,116 +93,16 @@ dataloaders = {x: DataLoader(image_datasets[x], batch_size=batchSize, shuffle=Tr
 
 dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val', 'test']}
 
-
-class ConvNetWithResidualUnits(nn.Module):
-    def __init__(self):
-        super(ConvNetWithResidualUnits, self).__init__()
-
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=2),
-            nn.PReLU(64),
-            nn.MaxPool2d(kernel_size=2, stride = 2),
-            nn.BatchNorm2d(64)
-        )
-        
-        self.residual1_conv1 = nn.Conv2d(in_channels = 64, out_channels = 64, kernel_size = 3, stride = 1, padding = 1)
-        self.residual1_bn = nn.BatchNorm2d(64)        
-        self.residual1_conv2 = nn.Conv2d(in_channels = 64, out_channels = 64, kernel_size = 3, stride = 1, padding = 1)
-        
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(in_channels=64, out_channels=256, kernel_size=3, stride=2),
-            nn.PReLU(256),
-            nn.MaxPool2d(kernel_size=2, stride = 2),
-            nn.BatchNorm2d(256)
-        )
-        
-        self.residual2_conv1 = nn.Conv2d(in_channels = 256, out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
-        self.residual2_bn = nn.BatchNorm2d(256)        
-        self.residual2_conv2 = nn.Conv2d(in_channels = 256, out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
-        
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(in_channels=256, out_channels=1024, kernel_size=3, stride=2),
-            nn.PReLU(1024),
-            nn.MaxPool2d(kernel_size=2, stride = 2),
-            nn.BatchNorm2d(1024)
-        )
-        
-        self.residual3_conv1 = nn.Conv2d(in_channels = 1024, out_channels = 1024, kernel_size = 3, stride = 1, padding = 1)
-        self.residual3_bn = nn.BatchNorm2d(1024)
-        self.residual3_conv2 = nn.Conv2d(in_channels = 1024, out_channels = 1024, kernel_size = 3, stride = 1, padding = 1)
-        
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(in_channels=1024, out_channels=2048, kernel_size=3, stride=2),
-            nn.PReLU(2048),
-            nn.MaxPool2d(kernel_size=2, stride = 2),
-            nn.BatchNorm2d(2048)
-        )
-        
-        self.conv5 = nn.Sequential(
-            nn.Conv2d(in_channels=2048, out_channels=4096, kernel_size=3, stride=2),
-            nn.PReLU(4096),
-            nn.MaxPool2d(kernel_size=2, stride = 2),
-            nn.BatchNorm2d(4096)
-        )
-        
-        self.conv6 = nn.Sequential(
-            nn.Conv2d(in_channels=4096, out_channels=1024, kernel_size=3, stride=2, padding = 1),
-            nn.PReLU(1024),
-            nn.AdaptiveMaxPool2d(1)
-        )
-        
-        self.out = nn.Linear(1024, num_classes)
-        self.dropout = nn.Dropout(dropout_rate)
-
-
-    def forward(self, x):
-        
-        x = self.conv1(x)
-        
-        residual = x
-        x = self.residual1_bn(F.relu(self.residual1_conv1(x)))
-        x = self.residual1_conv2(x)
-        x += residual
-        x = F.relu(x)
-        
-        x = self.conv2(x)
-        
-        residual = x
-        x = self.residual2_bn(F.relu(self.residual2_conv1(x)))
-        x = self.residual2_conv2(x)
-        x += residual
-        x = F.relu(x)
-        
-        x = self.conv3(x)
-        
-        residual = x
-        x = self.residual3_bn(F.relu(self.residual3_conv1(x)))
-        x = self.residual3_conv2(x)
-        x += residual
-        x = F.relu(x)
-        
-        x = self.conv4(x)
-        
-        x = self.conv5(x)
-        
-        x = self.conv6(x)
-        
-        x = x.view(x.size(0), -1)
-        x = self.dropout(self.out(x))
-        
-        return x
-
-ConvNetModel = ConvNetWithResidualUnits()
-print(ConvNetModel)
-
-print('')
-print('')
+model = inceptionresnetv2(num_classes=1000, pretrained='imagenet')
+model.avgpool_1a = torch.nn.AdaptiveAvgPool2d(1)
+fc_in_features = model.last_linear.in_features
+model.last_linear = torch.nn.Linear(fc_in_features, num_classes)
+print("Using Inception ResNet v2 model on 4 classes")
+print('-' * 20)
 print('')
 
 print('Training Start')
 print('-' * 20)
-
-print('')
 print('')
 
 model = model.to(device)
@@ -213,48 +117,33 @@ BestConvNetModel = train_model(modelParallel, dataloaders, criterion, optimizer,
                            model_folder = project_save_dir)
 
 print('')
-print('')
-print('')
 
 print('Training Completed')
+print('')
 
-print('')
-print('')
-print('')
 
 print('Validation Start')
 print('-' * 20)
-
-print('')
-print('')
 print('')
 
 outputs, preds, labels, accuracy, loss = evaluate_model(BestConvNetModel, dataloaders, criterion, phase = 'test')
-cm  = confusion_matrix(labels, preds)
 
-print('')
 print('')
 print('')
 
 print('Validation End')
 
 print('')
-print('')
-print('')
 
+y_target = label_binarize(labels, classes= [0,1,2,3])
+y_score = outputs.reshape(-1, 4)
 
-plot_confusion_matrix(cm, normalize = False, target_names = target_names, 
-                      title = "Confusion Matrix of {}".format(modelName), root_dir = project_save_loc, model_folder = project_save_dir)
+get_AUC(y_score, y_target, True)
 
-fig = plt.figure()
-fpr, tpr, _ = roc_curve(labels, preds)
-plt.plot([0, 1], [0, 1], 'k--')
-plt.plot(fpr, tpr, label = '{} AUC Score: {:.4f}'.format(modelName, auc(fpr, tpr)))
-plt.title('')
-plt.legend()
-plt.savefig(os.path.join(project_save_loc,project_save_dir, 'AUC_Score - Test'))
-plt.show()
+cm  = confusion_matrix(labels, preds)
 
+plot_confusion_matrix(cm, normalize = False, 
+                      target_names = target_names, 
+                      title = "Confusion Matrix of Inception_v2 4 class Classification Model")
 
-
-
+print('--------------------THE END------------------')

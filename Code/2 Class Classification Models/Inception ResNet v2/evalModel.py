@@ -37,6 +37,7 @@ def evaluate_model(model, dataloader, loss_fn, phase = 'test'):
         loss = loss_fn(output, label)
         _, pred = torch.max(output, dim = 1)
         num_inputs = inputs.size()[0]
+        output = F.softmax(output)
         outputs = np.append(outputs, output.cpu().detach().numpy())
         preds = np.append(preds, pred.cpu().detach().numpy())
         labels = np.append(labels, label.cpu().detach().numpy())
@@ -48,45 +49,92 @@ def evaluate_model(model, dataloader, loss_fn, phase = 'test'):
     
     return outputs[1:], preds[1:], labels[1:], accuracy, loss
 
-def plot_confusion_matrix(cm, target_names, title='Confusion matrix', 
-                          root_dir = '/scratch/bva212/dl4medProject/', model_folder = '', 
-                          cmap=None, normalize=True):
+def inference(model_ft,loader):
+    use_gpu = 1
+    model_ft.eval()
+    whole_output =[]
+    whole_target = []
+
+    for valData in loader:
+        data = valData['x']
+        target = valData['y']
+        if use_gpu:
+            data = data.type(torch.FloatTensor).cuda()
+            target = target.type(torch.LongTensor).cuda()
+        else:
+            data, target = data.type(torch.FloatTensor), target.type(torch.LongTensor)
+
+        output =F.softmax(model_ft(data),dim=1)
+        whole_output.append( output.cpu().data.numpy())
+        whole_target.append( valData['y'].numpy())
+
+    whole_output = np.concatenate(whole_output)
+    whole_target = np.concatenate(whole_target)
+
+    y_score = whole_output
+    y_target = label_binarize(whole_target, classes=[0, 1])
     
-    accuracy = np.trace(cm) / float(np.sum(cm))
-    misclass = 1 - accuracy
+    return y_score, y_target
 
-    if cmap is None:
-        cmap = plt.get_cmap('Blues')
+# this function AUC of ROC for binary classification problem. 
+from sklearn.metrics import roc_curve, auc
+from sklearn.preprocessing import label_binarize
+from scipy import interp
+from itertools import cycle
 
-    plt.figure(figsize=(8, 6))
+def get_AUC(y_score, y_target,plotROC=False):
+    # Compute ROC curve and ROC area
+    fpr, tpr, _ = roc_curve(y_target, y_score[:, 1])
+    roc_auc = auc(fpr, tpr)
+  
+    if plotROC:
+        lw = 2
+        # Plot all ROC curves
+        plt.figure()
+        plt.plot(fpr, tpr, lw=lw,
+                 label='ROC curve (area = %.6s)'%str(roc_auc))
+
+        plt.plot([0, 1], [0, 1], 'k--', lw=lw)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver operating characteristic (ROC) curve')
+        plt.legend(loc="lower right")
+        plt.show()
+
+    return roc_auc
+
+# confusion matrix function
+def plot_confusion_matrix(cm, classes,
+                          normalize=False,
+                          title='Confusion matrix',
+                          cmap=plt.cm.Blues):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title(title)
     plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
 
-    if target_names is not None:
-        tick_marks = np.arange(len(target_names))
-        plt.xticks(tick_marks, target_names, rotation=45)
-        plt.yticks(tick_marks, target_names)
-
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
-
-    thresh = cm.max() / 1.5 if normalize else cm.max() / 2
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        if normalize:
-            plt.text(j, i, "{:0.4f}".format(cm[i, j]),
-                     horizontalalignment="center",
-                     color="white" if cm[i, j] > thresh else "black")
-        else:
-            plt.text(j, i, "{:,}".format(cm[i, j]),
-                     horizontalalignment="center",
-                     color="white" if cm[i, j] > thresh else "black")
-
+        plt.text(j, i, format(cm[i, j], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
 
     plt.tight_layout()
     plt.ylabel('True label')
-    plt.xlabel('Predicted label\naccuracy={:0.4f}; misclass={:0.4f}'.format(accuracy, misclass))
-    plt.legend()
-    plt.savefig(os.path.join(root_dir,model_folder, 'ConfusionMatrix - Test'))
-    plt.show()
+    plt.xlabel('Predicted label')
+
+
