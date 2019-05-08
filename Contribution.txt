@@ -1,0 +1,19 @@
+Contributions
+In order to achieve such an ambitious yet achievable
+analysis, we separated the work between all
+of us in the following way:
+● Nhung Le (nhl256): 
+Preparing train / test / valid csv files for 2-class models;
+Developing ResNet18, ResNet34, and customized CNN models for 2-class models;
+Tuning hyper-parameters and optimization function for ResNet18, ResNet34, ResNet50, and customized CNN models;
+Developing evaluation code and graphs for 2-class models.
+● Nithish Addepalli (bva212): 
+Collecting and uploading data;
+Preprocessing data for Inception v2 and ResNet50 models; 
+Developing ResNet50, Inception v2 models for 2-class and 4-class models;
+Developing evaluation code and graphs for 4-class models.
+● Ravi Choudhary (rc3620): 
+Preparing train / test / valid csv files for 4-class models;
+Pre-processing data for customized CNN and Resnet18 for 4-class models; 
+Investigating and transforming images for 4-class models;
+Developing customized CNN, Resnet18, bounding box models; 
